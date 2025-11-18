@@ -44,7 +44,7 @@ finance_tracker/
 - **Data Analytics**: Visual charts and graphs for financial analysis
 
 ### Advanced Features
-- **Cloud Sync**: Automatic backup to Google Drive
+- **Cloud Sync**: Automatic backup to Google Drive (see [CLOUD_SYNC_SETUP.md](CLOUD_SYNC_SETUP.md))
 - **Import/Export**: CSV data import/export functionality
 - **Business Profile**: Manage business owner information
 - **Responsive Design**: Works on all screen sizes (mobile, tablet, desktop)
@@ -93,3 +93,44 @@ path_provider: ^2.1.1
 shared_preferences: ^2.2.2
 permission_handler: ^11.0.1
 share_plus: ^7.0.2
+```
+
+---
+
+## ☁️ Cloud Sync Configuration
+
+To enable Google Drive cloud sync functionality:
+
+1. **Follow the complete setup guide**: [CLOUD_SYNC_SETUP.md](CLOUD_SYNC_SETUP.md)
+2. **Quick configuration reference**: [CONFIGURATION_TEMPLATE.md](CONFIGURATION_TEMPLATE.md)
+3. **Quick commands**: [QUICK_COMMANDS.md](QUICK_COMMANDS.md)
+
+### Quick Start:
+
+1. Get your SHA-1 fingerprint:
+   ```powershell
+   cd android
+   .\gradlew signingReport
+   ```
+
+2. Configure Google Cloud Console (see CLOUD_SYNC_SETUP.md)
+
+3. Update `android/app/build.gradle.kts` with your Client ID
+
+4. Test the app:
+   ```powershell
+   flutter clean
+   flutter pub get
+   flutter run
+   ```
+
+**Note**: AndroidManifest.xml is already configured ✓
+
+---
+
+## 🚀 Getting Started
+
+### Installation
+
+```powershell
+flutter pub get

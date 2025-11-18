@@ -106,6 +106,7 @@ class _ChartsPageState extends State<ChartsPage> {
   }
 
   Widget _buildProfitLossChart(BuildContext context) {
+    // ignore: unused_local_variable
     final netProfit = _totalSales - _totalExpenses;
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 400;

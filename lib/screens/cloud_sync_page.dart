@@ -11,6 +11,7 @@ class _SimpleCloudSyncPageState extends State<SimpleCloudSyncPage> {
   bool _isLoading = false;
   String _statusMessage = '';
   bool _statusIsError = false;
+  String _statusDetail = '';
   Map<String, dynamic> _syncStatus = {};
   GoogleSignInAccount? _currentUser;
 
@@ -42,17 +43,19 @@ class _SimpleCloudSyncPageState extends State<SimpleCloudSyncPage> {
     }
   }
 
-  void _showStatus(String message, {bool isError = false}) {
+  void _showStatus(String message, {bool isError = false, String detail = ''}) {
     setState(() {
       _statusMessage = message;
       _statusIsError = isError;
+      _statusDetail = detail;
     });
-    
+
     // Clear status after 5 seconds
     Future.delayed(Duration(seconds: 5), () {
       if (mounted) {
         setState(() {
           _statusMessage = '';
+          _statusDetail = '';
         });
       }
     });
@@ -65,12 +68,20 @@ class _SimpleCloudSyncPageState extends State<SimpleCloudSyncPage> {
     });
 
     try {
-      final user = await CloudSyncService.signIn();
-      if (user != null) {
-        _showStatus('Signed in successfully as ${user.email}');
+      final result = await CloudSyncService.signIn();
+
+      // CloudSyncService.signIn() now returns Map<String, dynamic>
+      if (result['success'] == true) {
+        _showStatus(result['message'] ?? 'Signed in');
         await _loadSyncStatus();
       } else {
-        _showStatus('Sign in cancelled', isError: true);
+        final errorCode = (result['errorCode'] ?? 'SIGN_IN_FAILED') as String;
+        final message = (result['message'] ?? 'Sign-in failed') as String;
+        _showStatus(
+          message,
+          isError: true,
+          detail: _getSignInErrorDetail(errorCode),
+        );
       }
     } catch (e) {
       _showStatus('Error signing in: $e', isError: true);
@@ -87,9 +98,13 @@ class _SimpleCloudSyncPageState extends State<SimpleCloudSyncPage> {
     });
 
     try {
-      await CloudSyncService.signOut();
-      _showStatus('Signed out successfully');
-      await _loadSyncStatus();
+      final result = await CloudSyncService.signOut();
+      if (result['success'] == true) {
+        _showStatus(result['message'] ?? 'Signed out successfully');
+        await _loadSyncStatus();
+      } else {
+        _showStatus(result['message'] ?? 'Sign out failed', isError: true);
+      }
     } catch (e) {
       _showStatus('Error signing out: $e', isError: true);
     } finally {
@@ -128,12 +143,14 @@ class _SimpleCloudSyncPageState extends State<SimpleCloudSyncPage> {
     });
 
     try {
-      final success = await CloudSyncService.restoreData();
-      if (success) {
-        _showStatus('Data restored successfully!');
+      final result = await CloudSyncService.restoreData();
+      if (result['success'] == true) {
+        _showStatus(result['message'] ?? 'Data restored successfully!');
         await _loadSyncStatus();
       } else {
-        _showStatus('Restore failed or no backup found', isError: true);
+        final action = result['action'] ?? '';
+        final detail = action == 'signin_required' ? 'Please sign in to Google to restore your data.' : '';
+        _showStatus(result['message'] ?? 'Restore failed or no backup found', isError: true, detail: detail);
       }
     } catch (e) {
       _showStatus('Error during restore: $e', isError: true);
@@ -141,6 +158,27 @@ class _SimpleCloudSyncPageState extends State<SimpleCloudSyncPage> {
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  String _getSignInErrorDetail(String errorCode) {
+    switch (errorCode) {
+      case 'NETWORK_ERROR':
+        return 'Please check your internet connection and try again.';
+      case 'DEVELOPER_ERROR':
+        return 'There is a configuration issue with the app. Please contact support.';
+      case 'SCOPE_DENIED':
+        return 'Required permissions were not granted. Please try again and accept all permissions.';
+      case 'INVALID_ACCOUNT':
+        return 'The selected Google account cannot be used. Please try a different account.';
+      case 'CANCELLED':
+        return 'You cancelled the sign-in process.';
+      case 'MISSING_PLUGIN':
+        return 'The Google Sign-In plugin is not available on this platform or not registered. Try a full restart or run on Android/iOS.';
+      case 'UNSUPPORTED_PLATFORM':
+        return 'Google Sign-In is not supported on this platform. Use Android, iOS or Web, or add a desktop implementation.';
+      default:
+        return 'An unknown error occurred. Please try again.';
     }
   }
 
@@ -191,11 +229,27 @@ class _SimpleCloudSyncPageState extends State<SimpleCloudSyncPage> {
                     ),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
-                    _statusMessage,
-                    style: TextStyle(
-                      color: _statusIsError ? Colors.red[800] : Colors.green[800],
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _statusMessage,
+                        style: TextStyle(
+                          color: _statusIsError ? Colors.red[800] : Colors.green[800],
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (_statusDetail.isNotEmpty) ...[
+                        SizedBox(height: 8),
+                        Text(
+                          _statusDetail,
+                          style: TextStyle(
+                            color: _statusIsError ? Colors.red[700] : Colors.green[700],
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
 

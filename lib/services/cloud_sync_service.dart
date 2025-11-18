@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,7 +9,8 @@ class CloudSyncService {
   static final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: [
       'email',
-      'https://www.googleapis.com/auth/drive.file', // Add Drive scope
+      'https://www.googleapis.com/auth/drive.appdata', // AppData folder scope
+      'https://www.googleapis.com/auth/drive.file', // Drive file scope
     ],
     signInOption: SignInOption.standard, // Use standard sign-in
   );
@@ -38,47 +40,87 @@ class CloudSyncService {
     }
   }
 
-  // Sign in to Google
-  static Future<GoogleSignInAccount?> signIn() async {
+  // Sign in to Google - returns a result map to match UI expectations
+  static Future<Map<String, dynamic>> signIn() async {
+    // Prevent calling plugin on unsupported desktop platforms where
+    // the google_sign_in plugin may not have a native implementation.
+    if (!kIsWeb && !(defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)) {
+      print('Google Sign-In not supported on this platform: $defaultTargetPlatform');
+      return {
+        'success': false,
+        'message': 'Google Sign-In is not supported on this platform',
+        'errorCode': 'UNSUPPORTED_PLATFORM',
+      };
+    }
     try {
       print('Starting Google Sign-In...');
       final account = await _googleSignIn.signIn();
+
       if (account != null) {
         print('Sign-in successful: ${account.email}');
-        // Get auth headers to ensure they're available
-        final headers = await account.authHeaders;
-        print('Auth headers obtained successfully');
-        return account;
+        // Ensure auth headers are available
+        try {
+          final headers = await account.authHeaders;
+          if (headers['Authorization'] == null) {
+            print('Auth headers missing after sign-in');
+          }
+        } catch (e) {
+          print('Warning getting auth headers: $e');
+        }
+
+        return {
+          'success': true,
+          'message': 'Signed in as ${account.email}',
+          'account': account,
+        };
       } else {
         print('Sign-in cancelled by user');
-        return null;
+        return {
+          'success': false,
+          'message': 'Sign-in cancelled by user',
+          'errorCode': 'CANCELLED',
+        };
       }
     } catch (error) {
       print('Google Sign-In error: $error');
       print('Error type: ${error.runtimeType}');
-      
-      // Provide more specific error messages
-      if (error.toString().contains('SIGN_IN_REQUIRED')) {
-        print('Sign-in required - user needs to authenticate');
-      } else if (error.toString().contains('NETWORK_ERROR')) {
-        print('Network error during sign-in');
-      } else if (error.toString().contains('SIGN_IN_FAILED')) {
-        print('Sign-in failed - check configuration');
+
+      var code = 'SIGN_IN_FAILED';
+      final msg = error.toString();
+      // Map MissingPluginException and other common plugin errors
+      if (msg.contains('MissingPluginException') || msg.contains('No implementation found for method')) {
+        code = 'MISSING_PLUGIN';
       }
-      
-      return null;
+      if (msg.contains('NETWORK_ERROR')) code = 'NETWORK_ERROR';
+      else if (msg.contains('DEVELOPER_ERROR')) code = 'DEVELOPER_ERROR';
+      else if (msg.contains('SCOPE')) code = 'SCOPE_DENIED';
+      else if (msg.contains('INVALID_ACCOUNT')) code = 'INVALID_ACCOUNT';
+
+      return {
+        'success': false,
+        'message': 'Google sign-in failed',
+        'errorCode': code,
+        'error': msg,
+      };
     }
   }
 
-  // Sign out from Google
-  static Future<void> signOut() async {
+  // Sign out from Google - returns result map for UI
+  static Future<Map<String, dynamic>> signOut() async {
     try {
       await _googleSignIn.signOut();
       await _clearSyncTimestamp();
       print('Sign-out successful');
+      return {
+        'success': true,
+        'message': 'Signed out successfully',
+      };
     } catch (e) {
       print('Error during sign-out: $e');
-      rethrow;
+      return {
+        'success': false,
+        'message': 'Error signing out: ${e.toString()}',
+      };
     }
   }
 
@@ -147,12 +189,16 @@ class CloudSyncService {
     }
   }
 
-  // Simple restore from Google Drive
-  static Future<bool> restoreData() async {
+  // Simple restore from Google Drive - returns result map for UI
+  static Future<Map<String, dynamic>> restoreData() async {
     try {
       final authHeaders = await getAuthHeaders();
       if (authHeaders == null) {
-        throw Exception('Please sign in to Google first');
+        return {
+          'success': false,
+          'message': 'Please sign in to Google first',
+          'action': 'signin_required',
+        };
       }
 
       // Get the latest backup file from App Data folder
@@ -171,7 +217,7 @@ class CloudSyncService {
         final files = json.decode(response.body)['files'];
         if (files != null && files.isNotEmpty) {
           final fileId = files[0]['id'];
-          
+
           // Download the file
           final downloadResponse = await http.get(
             Uri.parse('https://www.googleapis.com/drive/v3/files/$fileId?alt=media'),
@@ -181,19 +227,40 @@ class CloudSyncService {
           );
 
           if (downloadResponse.statusCode == 200) {
-            return await _restoreFromBackupData(downloadResponse.body);
+            final ok = await _restoreFromBackupData(downloadResponse.body);
+            return {
+              'success': ok,
+              'message': ok ? 'Restore completed successfully' : 'Failed to restore data',
+              'action': ok ? 'restore' : 'restore_failed',
+            };
           } else {
-            throw Exception('Failed to download backup: ${downloadResponse.statusCode}');
+            return {
+              'success': false,
+              'message': 'Failed to download backup: ${downloadResponse.statusCode}',
+              'action': 'drive_access_failed',
+            };
           }
         } else {
-          throw Exception('No backup found. Please create a backup first.');
+          return {
+            'success': false,
+            'message': 'No backup found. Please create a backup first.',
+            'action': 'no_backup',
+          };
         }
       } else {
-        throw Exception('Failed to list backup files: ${response.statusCode}');
+        return {
+          'success': false,
+          'message': 'Failed to list backup files: ${response.statusCode}',
+          'action': 'drive_access_failed',
+        };
       }
     } catch (e) {
       print('Error restoring data: $e');
-      return false;
+      return {
+        'success': false,
+        'message': 'Error restoring data: ${e.toString()}',
+        'action': 'error',
+      };
     }
   }
 
