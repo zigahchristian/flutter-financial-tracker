@@ -6,6 +6,7 @@ import '../services/database_helper.dart';
 import '../models/models.dart';
 
 class PdfService {
+  
   static Future<void> generateReport({
     required List<Map<String, dynamic>> sales,
     required List<Map<String, dynamic>> expenses,
@@ -15,6 +16,8 @@ class PdfService {
     required double totalExpenses,
   }) async {
     final pdf = pw.Document();
+
+    
 
     // Fetch business owner directly from database
     final BusinessOwner? businessOwner = await _getBusinessOwner();
@@ -619,3 +622,4 @@ class PdfService {
     );
   }
 }
+

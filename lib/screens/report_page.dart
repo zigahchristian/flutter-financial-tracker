@@ -13,12 +13,14 @@ class ReportPage extends StatefulWidget {
 class _ReportPageState extends State<ReportPage> {
   DateTime _startDate = DateTime.now().subtract(Duration(days: 30));
   DateTime _endDate = DateTime.now();
+  DateTime _selectedDate = DateTime.now();
   double _totalSales = 0.0;
   double _totalExpenses = 0.0;
   List<Map<String, dynamic>> _sales = [];
   List<Map<String, dynamic>> _expenses = [];
   BusinessOwner? _businessOwner;
   bool _isLoading = false;
+  bool _isSingleDateMode = false; // false = range mode, true = single date mode
 
   @override
   void initState() {
@@ -47,10 +49,22 @@ class _ReportPageState extends State<ReportPage> {
     try {
       final dbHelper = DatabaseHelper();
       
-      _sales = await dbHelper.getSalesByDateRange(_startDate, _endDate);
-      _expenses = await dbHelper.getExpensesByDateRange(_startDate, _endDate);
-      _totalSales = await dbHelper.getTotalSalesByDateRange(_startDate, _endDate);
-      _totalExpenses = await dbHelper.getTotalExpensesByDateRange(_startDate, _endDate);
+      if (_isSingleDateMode) {
+        // Single date mode - get data for the selected single date
+        final startOfDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+        final endOfDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, 23, 59, 59);
+        
+        _sales = await dbHelper.getSalesByDateRange(startOfDay, endOfDay);
+        _expenses = await dbHelper.getExpensesByDateRange(startOfDay, endOfDay);
+        _totalSales = await dbHelper.getTotalSalesByDateRange(startOfDay, endOfDay);
+        _totalExpenses = await dbHelper.getTotalExpensesByDateRange(startOfDay, endOfDay);
+      } else {
+        // Range mode - get data for the selected date range
+        _sales = await dbHelper.getSalesByDateRange(_startDate, _endDate);
+        _expenses = await dbHelper.getExpensesByDateRange(_startDate, _endDate);
+        _totalSales = await dbHelper.getTotalSalesByDateRange(_startDate, _endDate);
+        _totalExpenses = await dbHelper.getTotalExpensesByDateRange(_startDate, _endDate);
+      }
 
       setState(() {
         _isLoading = false;
@@ -64,27 +78,136 @@ class _ReportPageState extends State<ReportPage> {
   }
 
   void _onDateRangeChanged(DateRangePickerSelectionChangedArgs args) {
-    if (args.value is PickerDateRange) {
-      final range = args.value as PickerDateRange;
-      if (range.startDate != null && range.endDate != null) {
+    if (_isSingleDateMode) {
+      if (args.value is DateTime) {
+        final selectedDate = args.value as DateTime;
         setState(() {
-          _startDate = range.startDate!;
-          _endDate = range.endDate!;
+          _selectedDate = selectedDate;
         });
         _loadReport();
+      }
+    } else {
+      if (args.value is PickerDateRange) {
+        final range = args.value as PickerDateRange;
+        if (range.startDate != null && range.endDate != null) {
+          setState(() {
+            _startDate = range.startDate!;
+            _endDate = range.endDate!;
+          });
+          _loadReport();
+        }
       }
     }
   }
 
+  void _selectToday() {
+    setState(() {
+      _selectedDate = DateTime.now();
+      if (!_isSingleDateMode) {
+        _startDate = DateTime.now();
+        _endDate = DateTime.now();
+      }
+    });
+    _loadReport();
+  }
+
+  void _selectYesterday() {
+    final yesterday = DateTime.now().subtract(Duration(days: 1));
+    setState(() {
+      _selectedDate = yesterday;
+      if (!_isSingleDateMode) {
+        _startDate = yesterday;
+        _endDate = yesterday;
+      }
+    });
+    _loadReport();
+  }
+
+  void _selectLast7Days() {
+    if (!_isSingleDateMode) {
+      setState(() {
+        _endDate = DateTime.now();
+        _startDate = DateTime.now().subtract(Duration(days: 6));
+      });
+      _loadReport();
+    }
+  }
+
+  void _selectLast30Days() {
+    if (!_isSingleDateMode) {
+      setState(() {
+        _endDate = DateTime.now();
+        _startDate = DateTime.now().subtract(Duration(days: 29));
+      });
+      _loadReport();
+    }
+  }
+
+  void _toggleDateMode() {
+    setState(() {
+      _isSingleDateMode = !_isSingleDateMode;
+      // Set sensible defaults when switching modes
+      if (_isSingleDateMode) {
+        _selectedDate = _endDate; // Use the end date as the single date
+      } else {
+        // When switching to range mode, set a default range
+        _startDate = DateTime.now().subtract(Duration(days: 30));
+        _endDate = DateTime.now();
+      }
+    });
+    _loadReport();
+  }
+
   Future<void> _generatePdfReport() async {
-    await PdfService.generateReport(
-      sales: _sales,
-      expenses: _expenses,
-      startDate: _startDate,
-      endDate: _endDate,
-      totalSales: _totalSales,
-      totalExpenses: _totalExpenses,
-    );
+    DateTime startDate, endDate;
+    
+    if (_isSingleDateMode) {
+      startDate = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+      endDate = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, 23, 59, 59);
+    } else {
+      startDate = _startDate;
+      endDate = _endDate;
+    }
+    
+    try {
+      await PdfService.generateReport(
+  sales: _sales,
+  expenses: _expenses,
+  startDate: startDate,
+  endDate: endDate,
+  totalSales: _totalSales,
+  totalExpenses: _totalExpenses,
+
+);
+      
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF report generated successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error generating PDF: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to generate PDF report: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  String _getDateRangeText() {
+    if (_isSingleDateMode) {
+      return DateFormat('MMMM dd, yyyy').format(_selectedDate);
+    } else {
+      if (_startDate.year == _endDate.year && _startDate.month == _endDate.month && _startDate.day == _endDate.day) {
+        return DateFormat('MMMM dd, yyyy').format(_startDate);
+      } else {
+        return '${DateFormat('MMM dd, yyyy').format(_startDate)} - ${DateFormat('MMM dd, yyyy').format(_endDate)}';
+      }
+    }
   }
 
   @override
@@ -100,32 +223,102 @@ class _ReportPageState extends State<ReportPage> {
           padding: EdgeInsets.all(isSmallScreen ? 12.0 : 16.0),
           child: Column(
             children: [
-              // Date Range Picker Card
+              // Date Selection Card
               Card(
                 child: Padding(
                   padding: EdgeInsets.all(isSmallScreen ? 12.0 : 16.0),
                   child: Column(
                     children: [
-                      Text(
-                        'Select Date Range',
-                        style: TextStyle(
-                          fontSize: isSmallScreen ? 16 : 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
+                      // Mode Toggle and Title
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            _isSingleDateMode ? 'Select Date' : 'Select Date Range',
+                            style: TextStyle(
+                              fontSize: isSmallScreen ? 16 : 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              Text(
+                                'Single',
+                                style: TextStyle(
+                                  fontSize: isSmallScreen ? 12 : 14,
+                                  color: _isSingleDateMode ? Colors.blue : Colors.grey,
+                                ),
+                              ),
+                              Switch(
+                                value: _isSingleDateMode,
+                                onChanged: (value) => _toggleDateMode(),
+                                activeColor: Colors.blue,
+                              ),
+                              Text(
+                                'Range',
+                                style: TextStyle(
+                                  fontSize: isSmallScreen ? 12 : 14,
+                                  color: !_isSingleDateMode ? Colors.blue : Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                      SizedBox(height: isSmallScreen ? 12 : 16),
+                      SizedBox(height: isSmallScreen ? 8 : 12),
+                      
+                      // Quick selection buttons
+                      _buildQuickSelectionButtons(isSmallScreen),
+                      SizedBox(height: isSmallScreen ? 8 : 12),
+                      
+                      // Selected date/range display
+                      Container(
+                        padding: EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[50],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              _isSingleDateMode ? Icons.calendar_today : Icons.date_range,
+                              color: Colors.blue, 
+                              size: isSmallScreen ? 16 : 18
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              _getDateRangeText(),
+                              style: TextStyle(
+                                fontSize: isSmallScreen ? 14 : 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue[800],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: isSmallScreen ? 8 : 12),
+                      
+                      // Date Picker
                       Container(
                         height: isSmallScreen ? 200 : 250,
                         child: SfDateRangePicker(
                           onSelectionChanged: _onDateRangeChanged,
-                          selectionMode: DateRangePickerSelectionMode.range,
-                          initialSelectedRange: PickerDateRange(_startDate, _endDate),
+                          selectionMode: _isSingleDateMode 
+                              ? DateRangePickerSelectionMode.single
+                              : DateRangePickerSelectionMode.range,
+                          initialSelectedDate: _selectedDate,
+                          initialSelectedRange: _isSingleDateMode 
+                              ? null 
+                              : PickerDateRange(_startDate, _endDate),
                           showActionButtons: true,
                           showNavigationArrow: true,
                           monthViewSettings: DateRangePickerMonthViewSettings(
                             enableSwipeSelection: false,
                           ),
+                          selectionColor: Colors.blue,
+                          todayHighlightColor: Colors.orange,
                         ),
                       ),
                     ],
@@ -184,6 +377,95 @@ class _ReportPageState extends State<ReportPage> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildQuickSelectionButtons(bool isSmallScreen) {
+    return Column(
+      children: [
+        if (_isSingleDateMode) 
+          // Single date quick selections
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _selectYesterday,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _selectedDate.day == DateTime.now().subtract(Duration(days: 1)).day ? 
+                        Colors.blue : Colors.grey,
+                    side: BorderSide(
+                      color: _selectedDate.day == DateTime.now().subtract(Duration(days: 1)).day ? 
+                          Colors.blue : Colors.grey,
+                    ),
+                  ),
+                  child: Text(
+                    'Yesterday',
+                    style: TextStyle(fontSize: isSmallScreen ? 12 : 14),
+                  ),
+                ),
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _selectToday,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _selectedDate.day == DateTime.now().day ? 
+                        Colors.blue : Colors.grey,
+                    side: BorderSide(
+                      color: _selectedDate.day == DateTime.now().day ? 
+                          Colors.blue : Colors.grey,
+                    ),
+                  ),
+                  child: Text(
+                    'Today',
+                    style: TextStyle(fontSize: isSmallScreen ? 12 : 14),
+                  ),
+                ),
+              ),
+            ],
+          )
+        else
+          // Range quick selections
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _selectLast7Days,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _endDate.difference(_startDate).inDays == 6 ? 
+                        Colors.blue : Colors.grey,
+                    side: BorderSide(
+                      color: _endDate.difference(_startDate).inDays == 6 ? 
+                          Colors.blue : Colors.grey,
+                    ),
+                  ),
+                  child: Text(
+                    'Last 7 Days',
+                    style: TextStyle(fontSize: isSmallScreen ? 12 : 14),
+                  ),
+                ),
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _selectLast30Days,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _endDate.difference(_startDate).inDays == 29 ? 
+                        Colors.blue : Colors.grey,
+                    side: BorderSide(
+                      color: _endDate.difference(_startDate).inDays == 29 ? 
+                          Colors.blue : Colors.grey,
+                    ),
+                  ),
+                  child: Text(
+                    'Last 30 Days',
+                    style: TextStyle(fontSize: isSmallScreen ? 12 : 14),
+                  ),
+                ),
+              ),
+            ],
+          ),
+      ],
     );
   }
 
@@ -271,10 +553,18 @@ class _ReportPageState extends State<ReportPage> {
         child: Column(
           children: [
             Text(
-              'Financial Summary',
+              _isSingleDateMode ? 'Daily Financial Summary' : 'Financial Summary',
               style: TextStyle(
                 fontSize: isSmallScreen ? 16 : 18,
                 fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: isSmallScreen ? 8 : 12),
+            Text(
+              _getDateRangeText(),
+              style: TextStyle(
+                fontSize: isSmallScreen ? 12 : 14,
+                color: Colors.grey[600],
               ),
             ),
             SizedBox(height: isSmallScreen ? 12 : 16),
@@ -366,7 +656,7 @@ class _ReportPageState extends State<ReportPage> {
           size: isSmallScreen ? 20 : 24
         ),
         label: Text(
-          'Generate PDF Report',
+          _isSingleDateMode ? 'Generate Daily PDF Report' : 'Generate PDF Report',
           style: TextStyle(
             fontSize: isSmallScreen ? 14 : 16,
             fontWeight: FontWeight.bold,
@@ -391,12 +681,24 @@ class _ReportPageState extends State<ReportPage> {
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Text(
-              'Transaction Details',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+            child: Column(
+              children: [
+                Text(
+                  _isSingleDateMode ? 'Daily Transaction Details' : 'Transaction Details',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  _getDateRangeText(),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
             ),
           ),
           DefaultTabController(
@@ -481,7 +783,7 @@ class _ReportPageState extends State<ReportPage> {
             ),
             SizedBox(height: 16),
             Text(
-              'No ${isSales ? 'sales' : 'expenses'} recorded\nfor this period',
+              'No ${isSales ? 'sales' : 'expenses'} recorded\nfor ${_isSingleDateMode ? 'this day' : 'this period'}',
               style: TextStyle(
                 fontSize: 16,
                 color: Colors.grey[600],
@@ -498,6 +800,8 @@ class _ReportPageState extends State<ReportPage> {
       itemCount: transactions.length,
       itemBuilder: (context, index) {
         final transaction = transactions[index];
+        final transactionDate = DateTime.parse(transaction['date']);
+        
         return Card(
           margin: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
           elevation: 1,
@@ -531,7 +835,9 @@ class _ReportPageState extends State<ReportPage> {
                   style: TextStyle(fontSize: 12),
                 ),
                 Text(
-                  DateFormat('MMM dd, yyyy').format(DateTime.parse(transaction['date'])),
+                  _isSingleDateMode 
+                      ? DateFormat('h:mm a').format(transactionDate)
+                      : DateFormat('MMM dd, yyyy').format(transactionDate),
                   style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                 ),
               ],
